@@ -62,7 +62,7 @@ if 'portfolio' not in st.session_state:
     st.session_state['goal_final'] = 3000000 # 최종 목표: 월 300만 원
 
 df = st.session_state['portfolio'].copy()
-live_data = get_live_data(df['종목코드'].unique())
+live_data = get_live_data(List(df['종목코드'].unique()))
 live_rate = live_data['USDKRW']
 
 # -----------------------------------------------------------------------------
