@@ -11,44 +11,59 @@ st.set_page_config(page_title="Dividend Pro Dashboard", page_icon="🚀", layout
 st.markdown("""
 <style>
     .reportview-container { background-color: #0d1117; color: #e6edf3; }
-    .metric-card {
-        background: linear-gradient(135deg, #161b22 0%, #1f242d 100%);
-        border: 1px solid #30363d; border-radius: 14px; padding: 18px; margin-bottom: 12px;
-        box-shadow: 0 4px 12px rgba(0,0,0,0.4);
-    }
+    .metric-card { background: linear-gradient(135deg, #161b22 0%, #1f242d 100%); border: 1px solid #30363d; border-radius: 14px; padding: 18px; margin-bottom: 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.4); }
     .metric-title { color: #8b949e; font-size: 0.85rem; font-weight: 500; margin-bottom: 6px; }
     .metric-value-green { color: #2ea043; font-size: 1.5rem; font-weight: 700; }
     .metric-value-cyan { color: #58a6ff; font-size: 1.5rem; font-weight: 700; }
+    .metric-value-white { color: #ffffff; font-size: 1.5rem; font-weight: 700; }
+    .alert-card { background-color: rgba(248, 81, 73, 0.1); border: 1px solid #f85149; border-radius: 10px; padding: 12px; margin-bottom: 15px; color: #ff7b72; font-weight: 600; }
     .stProgress > div > div > div > div { background-color: #2ea043; }
 </style>
 """, unsafe_allow_html=True)
 
 # -----------------------------------------------------------------------------
-# 2. 실시간 데이터 수집
+# 2. 실시간 데이터 수집 (주가, 배당률, 배당락일 자동화)
 # -----------------------------------------------------------------------------
-@st.cache_data(ttl=600)
+@st.cache_data(ttl=3600)
 def get_live_data(tickers):
     data = {}
     try: data['USDKRW'] = round(yf.Ticker("USDKRW=X").fast_info['last_price'], 2)
-    except: data['USDKRW'] = 1380.00
+    except: data['USDKRW'] = 1400.00 
     
     for t in tickers:
-        try: data[t] = yf.Ticker(t).fast_info['last_price']
-        except: data[t] = 0.0
+        ticker_obj = yf.Ticker(t)
+        # 1. 현재가
+        try: price = ticker_obj.fast_info['last_price']
+        except: price = 0.0
+        
+        # 2. 실시간 배당률 (Trailing Annual Dividend Yield)
+        try: 
+            div_yield = ticker_obj.info.get('dividendYield') or ticker_obj.info.get('trailingAnnualDividendYield', 0.0)
+            div_yield_pct = round(div_yield * 100, 2) if div_yield else 0.0
+        except: div_yield_pct = 0.0
+        
+        # 3. 배당락일 (Ex-Dividend Date)
+        try:
+            ex_date_ts = ticker_obj.info.get('exDividendDate')
+            if ex_date_ts:
+                ex_date_str = datetime.fromtimestamp(ex_date_ts).strftime('%Y-%m-%d')
+            else:
+                ex_date_str = "-"
+        except: ex_date_str = "-"
+        
+        data[t] = {'price': price, 'yield': div_yield_pct, 'ex_date': ex_date_str}
     return data
 
 # -----------------------------------------------------------------------------
-# 3. 데이터 초기화 (삼성증권 SCHD 분리 반영)
+# 3. 데이터 초기화 (배당주기 추가)
 # -----------------------------------------------------------------------------
 if 'portfolio' not in st.session_state:
     st.session_state['portfolio'] = pd.DataFrame([
-        # SCHD가 카카오페이와 삼성증권에 각각 분리되어 입력된 모습
-        {"계좌": "내 계좌", "증권사": "카카오페이", "종목코드": "SCHD", "보유수량": 15.0, "평균매수가(USD)": 78.5, "매일모으기(USD)": 10.0, "예상시가배당률(%)": 3.4},
-        {"계좌": "내 계좌", "증권사": "삼성증권", "종목코드": "SCHD", "보유수량": 30.5, "평균매수가(USD)": 80.2, "매일모으기(USD)": 0.0, "예상시가배당률(%)": 3.4},
-        
-        {"계좌": "내 계좌", "증권사": "카카오페이", "종목코드": "JEPI", "보유수량": 30.0, "평균매수가(USD)": 56.2, "매일모으기(USD)": 15.0, "예상시가배당률(%)": 7.5},
-        {"계좌": "아내 계좌", "증권사": "토스증권", "종목코드": "JEPQ", "보유수량": 25.0, "평균매수가(USD)": 54.0, "매일모으기(USD)": 10.0, "예상시가배당률(%)": 9.2},
-        {"계좌": "아내 계좌", "증권사": "카카오페이", "종목코드": "O", "보유수량": 20.0, "평균매수가(USD)": 55.0, "매일모으기(USD)": 8.0, "예상시가배당률(%)": 5.3},
+        {"계좌": "내 계좌", "증권사": "카카오페이", "종목코드": "SCHD", "보유수량": 15.0, "평균매수가(USD)": 78.5, "매일모으기(KRW)": 10000, "배당주기": "분기(3,6,9,12월)"},
+        {"계좌": "내 계좌", "증권사": "삼성증권", "종목코드": "SCHD", "보유수량": 30.5, "평균매수가(USD)": 80.2, "매일모으기(KRW)": 0, "배당주기": "분기(3,6,9,12월)"},
+        {"계좌": "내 계좌", "증권사": "카카오페이", "종목코드": "JEPI", "보유수량": 30.0, "평균매수가(USD)": 56.2, "매일모으기(KRW)": 15000, "배당주기": "월배당"},
+        {"계좌": "아내 계좌", "증권사": "토스증권", "종목코드": "JEPQ", "보유수량": 25.0, "평균매수가(USD)": 54.0, "매일모으기(KRW)": 10000, "배당주기": "월배당"},
+        {"계좌": "아내 계좌", "증권사": "카카오페이", "종목코드": "O", "보유수량": 20.0, "평균매수가(USD)": 55.0, "매일모으기(KRW)": 10000, "배당주기": "월배당"},
     ])
     st.session_state['goal_1'] = 500000
     st.session_state['goal_final'] = 3000000
@@ -58,81 +73,94 @@ live_data = get_live_data(list(raw_df['종목코드'].unique()))
 live_rate = live_data['USDKRW']
 
 # -----------------------------------------------------------------------------
-# 4. 헤더
+# 4. 헤더 및 배당락일 알림
 # -----------------------------------------------------------------------------
-col_header1, col_header2 = st.columns([2, 1])
-with col_header1: st.markdown("### 📈 실시간 배당주 포트폴리오 대시보드")
-with col_header2: st.markdown(f"<div style='text-align: right; color: #58a6ff; font-weight: 600;'>● LIVE 환율: 1 USD = {live_rate:,.2f} KRW</div>", unsafe_allow_html=True)
+col_h1, col_h2 = st.columns([2, 1])
+with col_h1: st.markdown("### 📈 실시간 배당주 포트폴리오 대시보드")
+with col_h2: st.markdown(f"<div style='text-align: right; color: #58a6ff; font-weight: 600;'>● LIVE 환율: {live_rate:,.2f} 원</div>", unsafe_allow_html=True)
+
+# 배당락일 알림 렌더링
+upcoming_ex_dates = []
+for t in raw_df['종목코드'].unique():
+    d = live_data.get(t, {}).get('ex_date', '-')
+    if d != '-' and d >= datetime.now().strftime('%Y-%m-%d'):
+        upcoming_ex_dates.append(f"{t} ({d})")
+
+if upcoming_ex_dates:
+    alert_text = " | ".join(upcoming_ex_dates)
+    st.markdown(f"<div class='alert-card'>🔔 다가오는 배당락일: {alert_text}</div>", unsafe_allow_html=True)
 
 # -----------------------------------------------------------------------------
-# 5. 탭 구성 (대시보드 / 설정)
+# 5. 탭 구성
 # -----------------------------------------------------------------------------
-tab_dashboard, tab_settings = st.tabs(["📊 통합 대시보드", "⚙️ 목표 및 포트폴리오 수정"])
+tab_dashboard, tab_settings = st.tabs(["📊 통합 대시보드", "⚙️ 포트폴리오 수정"])
 
 with tab_dashboard:
-    # === 🌟 다중 계좌 및 증권사 필터 추가 🌟 ===
-    col_filter1, col_filter2 = st.columns(2)
-    with col_filter1:
-        account_list = ["전체 합산"] + list(raw_df["계좌"].unique())
-        selected_account = st.selectbox("👤 계좌 필터", account_list)
-    with col_filter2:
-        broker_list = ["전체 증권사"] + list(raw_df["증권사"].unique())
-        selected_broker = st.selectbox("🏛️ 증권사 필터", broker_list)
+    col_f1, col_f2 = st.columns(2)
+    with col_f1:
+        selected_account = st.selectbox("👤 계좌 필터", ["전체 합산"] + list(raw_df["계좌"].unique()))
+    with col_f2:
+        selected_broker = st.selectbox("🏛️ 증권사 필터", ["전체 증권사"] + list(raw_df["증권사"].unique()))
     
-    # 선택된 필터에 따라 데이터프레임 필터링
     filtered_df = raw_df.copy()
-    if selected_account != "전체 합산":
-        filtered_df = filtered_df[filtered_df["계좌"] == selected_account]
-    if selected_broker != "전체 증권사":
-        filtered_df = filtered_df[filtered_df["증권사"] == selected_broker]
+    if selected_account != "전체 합산": filtered_df = filtered_df[filtered_df["계좌"] == selected_account]
+    if selected_broker != "전체 증권사": filtered_df = filtered_df[filtered_df["증권사"] == selected_broker]
 
-    # 필터링된 데이터로 자산 및 세금 계산
-    filtered_df['현재가(USD)'] = filtered_df['종목코드'].map(lambda x: live_data.get(x, 0))
+    # 실시간 데이터 병합
+    filtered_df['현재가(USD)'] = filtered_df['종목코드'].map(lambda x: live_data.get(x, {}).get('price', 0))
+    filtered_df['실시간배당률(%)'] = filtered_df['종목코드'].map(lambda x: live_data.get(x, {}).get('yield', 0))
+    filtered_df['배당락일'] = filtered_df['종목코드'].map(lambda x: live_data.get(x, {}).get('ex_date', '-'))
+    
     filtered_df['평가금액(USD)'] = filtered_df['보유수량'] * filtered_df['현재가(USD)']
     filtered_df['수익률(%)'] = ((filtered_df['현재가(USD)'] - filtered_df['평균매수가(USD)']) / filtered_df['평균매수가(USD)']) * 100
-    filtered_df['연간세전배당(USD)'] = filtered_df['평가금액(USD)'] * (filtered_df['예상시가배당률(%)'] / 100.0)
+    filtered_df['연간세전배당(USD)'] = filtered_df['평가금액(USD)'] * (filtered_df['실시간배당률(%)'] / 100.0)
     filtered_df['연간세후배당(USD)'] = filtered_df['연간세전배당(USD)'] * (1 - 0.154)
 
     total_assets_krw = filtered_df['평가금액(USD)'].sum() * live_rate
     total_monthly_div_krw = (filtered_df['연간세후배당(USD)'].sum() * live_rate) / 12.0
-    total_daily_dca_usd = filtered_df['매일모으기(USD)'].sum()
-
-    st.markdown("---")
+    total_daily_dca_krw = filtered_df['매일모으기(KRW)'].sum()
     
-    # 핵심 지표 카드
+    st.markdown("---")
     c1, c2, c3 = st.columns(3)
-    with c1: st.markdown(f"""<div class="metric-card"><div class="metric-title">실수령 월 배당금 (세후)</div><div class="metric-value-green">약 {int(total_monthly_div_krw):,} 원</div></div>""", unsafe_allow_html=True)
-    with c2: st.markdown(f"""<div class="metric-card"><div class="metric-title">선택된 포트폴리오 평가 자산</div><div class="metric-value-cyan">{int(total_assets_krw):,} 원</div></div>""", unsafe_allow_html=True)
-    with c3: st.markdown(f"""<div class="metric-card"><div class="metric-title">일일 자동 매수 설정액</div><div class="metric-value-white">${total_daily_dca_usd:,.2f}</div></div>""", unsafe_allow_html=True)
+    with c1: st.markdown(f"""<div class="metric-card"><div class="metric-title">실수령 월 평균 배당금 (세후)</div><div class="metric-value-green">약 {int(total_monthly_div_krw):,} 원</div></div>""", unsafe_allow_html=True)
+    with c2: st.markdown(f"""<div class="metric-card"><div class="metric-title">총 포트폴리오 평가 자산</div><div class="metric-value-cyan">{int(total_assets_krw):,} 원</div></div>""", unsafe_allow_html=True)
+    with c3: st.markdown(f"""<div class="metric-card"><div class="metric-title">일일 자동 매수 설정액</div><div class="metric-value-white">{int(total_daily_dca_krw):,} 원</div></div>""", unsafe_allow_html=True)
 
-    # 차트 렌더링 (동일 종목코드 합산)
-    st.markdown("#### 🥧 자산 비중 및 배당 기여도 차트")
-    if not filtered_df.empty:
-        col_chart1, col_chart2 = st.columns(2)
-        chart_df = filtered_df.groupby('종목코드').agg({'평가금액(USD)': 'sum', '연간세후배당(USD)': 'sum'})
-        with col_chart1:
-            st.caption("자산 비중 (평가금액 기준)")
-            st.bar_chart(chart_df['평가금액(USD)'])
-        with col_chart2:
-            st.caption("배당 기여도 (연간 세후배당금 기준)")
-            st.line_chart(chart_df['연간세후배당(USD)'])
-    else:
-        st.info("선택하신 조건에 해당하는 종목이 없습니다.")
+    # 🌟 1월~12월 월별 배당 분포도 캘린더 생성 🌟
+    st.markdown("#### 📅 1월~12월 예상 배당 현금흐름 (세후 KRW)")
+    
+    month_labels = [f"{m}월" for m in range(1, 13)]
+    monthly_data = {m: 0.0 for m in month_labels}
+    
+    for idx, row in filtered_df.iterrows():
+        krw_annual = row['연간세후배당(USD)'] * live_rate
+        cycle = str(row['배당주기'])
+        
+        if '월배당' in cycle:
+            for m in month_labels:
+                monthly_data[m] += krw_annual / 12.0
+        elif '분기' in cycle:
+            # 3, 6, 9, 12월 분기배당 (SCHD 등)
+            for m in ["3월", "6월", "9월", "12월"]:
+                monthly_data[m] += krw_annual / 4.0
+        else:
+            # 분류 안 된 종목은 12월에 합산
+            monthly_data["12월"] += krw_annual
+            
+    df_monthly_chart = pd.DataFrame(list(monthly_data.items()), columns=['Month', '예상 배당금(원)']).set_index('Month')
+    st.bar_chart(df_monthly_chart, color="#2ea043")
 
-    # 상세 내역 표
     st.subheader("📑 실시간 보유 내역")
-    display_df = filtered_df[['계좌', '증권사', '종목코드', '보유수량', '평균매수가(USD)', '현재가(USD)', '수익률(%)', '매일모으기(USD)']].copy()
-    st.dataframe(display_df.style.format({'현재가(USD)': '{:.2f}', '수익률(%)': '{:+.2f}%'}), use_container_width=True, hide_index=True)
+    display_df = filtered_df[['계좌', '증권사', '종목코드', '보유수량', '평균매수가(USD)', '현재가(USD)', '수익률(%)', '실시간배당률(%)', '배당락일', '매일모으기(KRW)']].copy()
+    st.dataframe(display_df.style.format({'현재가(USD)': '{:.2f}', '수익률(%)': '{:+.2f}%', '실시간배당률(%)': '{:.2f}%', '매일모으기(KRW)': '{:,.0f}'}), use_container_width=True, hide_index=True)
 
 with tab_settings:
-    st.info("💡 카카오페이와 삼성증권에 같은 종목이 있다면, 평단가를 계산할 필요 없이 아래처럼 행을 두 개 만들어서 각각 있는 그대로 입력하시면 차트에서 알아서 합산해 줍니다!")
+    st.info("💡 실시간 배당률은 이제 자동으로 불러옵니다! 종목의 '배당주기'(월배당 / 분기배당)만 정확히 입력해 주세요.")
     
-    st.markdown("### 🎯 목표 금액 설정 (원 단위)")
     c1, c2 = st.columns(2)
     with c1: new_g1 = st.number_input("1차 목표 월 배당금", value=st.session_state['goal_1'], step=50000)
     with c2: new_gfinal = st.number_input("최종 목표 월 배당금", value=st.session_state['goal_final'], step=100000)
     
-    st.markdown("### ⚙️ 포트폴리오 에디터")
     edited_df = st.data_editor(st.session_state['portfolio'], num_rows="dynamic", use_container_width=True, hide_index=True)
     
     if st.button("💾 데이터 저장 및 차트 반영하기", type="primary"):
