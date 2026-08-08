@@ -22,7 +22,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # -----------------------------------------------------------------------------
-# 2. 실시간 데이터 수집 (빈칸 오류 방어 코드 추가)
+# 2. 실시간 데이터 수집 (빈칸 방어 적용)
 # -----------------------------------------------------------------------------
 @st.cache_data(ttl=3600)
 def get_live_data(tickers):
@@ -31,23 +31,19 @@ def get_live_data(tickers):
     except: data['USDKRW'] = 1350.00 
     
     for t in tickers:
-        # 🌟 빈칸이거나 유효하지 않은 종목코드 무시 (에러 방어)
         if pd.isna(t) or str(t).strip() == "":
             continue
             
         ticker_obj = yf.Ticker(str(t).strip())
         
-        # 1. 현재가
         try: price = ticker_obj.fast_info['last_price']
         except: price = 0.0
         
-        # 2. 실시간 배당률
         try: 
             div_yield = ticker_obj.info.get('dividendYield') or ticker_obj.info.get('trailingAnnualDividendYield', 0.0)
             div_yield_pct = round(div_yield * 100, 2) if div_yield else 0.0
         except: div_yield_pct = 0.0
         
-        # 3. 배당락일
         try:
             ex_date_ts = ticker_obj.info.get('exDividendDate')
             if ex_date_ts:
@@ -60,10 +56,10 @@ def get_live_data(tickers):
     return data
 
 # -----------------------------------------------------------------------------
-# 3. 데이터 초기화
+# 3. 데이터 초기화 (저장소 이름 v3로 변경하여 메모리 충돌 해결)
 # -----------------------------------------------------------------------------
-if 'portfolio' not in st.session_state:
-    st.session_state['portfolio'] = pd.DataFrame([
+if 'portfolio_v3' not in st.session_state:
+    st.session_state['portfolio_v3'] = pd.DataFrame([
         {"계좌": "내 계좌", "증권사": "카카오페이", "종목코드": "SCHD", "보유수량": 15.0, "평균매수가(USD)": 78.5, "매일모으기(KRW)": 10000, "배당주기": "분기(3,6,9,12월)"},
         {"계좌": "내 계좌", "증권사": "삼성증권", "종목코드": "SCHD", "보유수량": 30.5, "평균매수가(USD)": 80.2, "매일모으기(KRW)": 0, "배당주기": "분기(3,6,9,12월)"},
         {"계좌": "내 계좌", "증권사": "카카오페이", "종목코드": "JEPI", "보유수량": 30.0, "평균매수가(USD)": 56.2, "매일모으기(KRW)": 15000, "배당주기": "월배당"},
@@ -73,7 +69,7 @@ if 'portfolio' not in st.session_state:
     st.session_state['goal_1'] = 500000
     st.session_state['goal_final'] = 3000000
 
-raw_df = st.session_state['portfolio'].copy()
+raw_df = st.session_state['portfolio_v3'].copy()
 live_data = get_live_data(list(raw_df['종목코드'].unique()))
 live_rate = live_data['USDKRW']
 
@@ -117,7 +113,6 @@ with tab_dashboard:
     
     filtered_df['평가금액(USD)'] = pd.to_numeric(filtered_df['보유수량'], errors='coerce').fillna(0) * filtered_df['현재가(USD)']
     
-    # 평단가 0일 경우 수익률 계산 오류 방지
     avg_price = pd.to_numeric(filtered_df['평균매수가(USD)'], errors='coerce').fillna(1)
     avg_price = avg_price.replace(0, 1) 
     filtered_df['수익률(%)'] = ((filtered_df['현재가(USD)'] - avg_price) / avg_price) * 100
@@ -127,6 +122,8 @@ with tab_dashboard:
 
     total_assets_krw = filtered_df['평가금액(USD)'].sum() * live_rate
     total_monthly_div_krw = (filtered_df['연간세후배당(USD)'].sum() * live_rate) / 12.0
+    
+    # 🌟 이 부분이 문제없이 작동하도록 메모리 충돌을 해결했습니다 🌟
     total_daily_dca_krw = pd.to_numeric(filtered_df['매일모으기(KRW)'], errors='coerce').fillna(0).sum()
     
     st.markdown("---")
@@ -160,17 +157,17 @@ with tab_dashboard:
     st.dataframe(display_df.style.format({'현재가(USD)': '{:.2f}', '수익률(%)': '{:+.2f}%', '실시간배당률(%)': '{:.2f}%', '매일모으기(KRW)': '{:,.0f}'}), use_container_width=True, hide_index=True)
 
 with tab_settings:
-    st.info("💡 종목을 추가하실 때는 빈칸(행)을 먼저 만들지 마시고, 데이터가 있는 상태에서 입력해 주시면 더욱 안정적입니다!")
+    st.info("💡 종목을 추가하실 때는 빈칸(행)을 먼저 만들지 마시고, 데이터가 있는 상태에서 바로 입력해 주시면 오류를 방지할 수 있습니다!")
     
     c1, c2 = st.columns(2)
     with c1: new_g1 = st.number_input("1차 목표 월 배당금", value=st.session_state['goal_1'], step=50000)
     with c2: new_gfinal = st.number_input("최종 목표 월 배당금", value=st.session_state['goal_final'], step=100000)
     
-    edited_df = st.data_editor(st.session_state['portfolio'], num_rows="dynamic", use_container_width=True, hide_index=True)
+    edited_df = st.data_editor(st.session_state['portfolio_v3'], num_rows="dynamic", use_container_width=True, hide_index=True)
     
     if st.button("💾 데이터 저장 및 차트 반영하기", type="primary"):
         st.session_state['goal_1'] = new_g1
         st.session_state['goal_final'] = new_gfinal
-        st.session_state['portfolio'] = edited_df
+        st.session_state['portfolio_v3'] = edited_df
         st.success("완료! 대시보드가 업데이트됩니다.")
         st.rerun()
